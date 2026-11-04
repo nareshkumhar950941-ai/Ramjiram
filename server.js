@@ -6,7 +6,7 @@ const cors = require('cors');
 
 // ==================== CONFIGURATION ====================
 // Render Environment Variables se BOT_TOKEN lega
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN = process.env.BOT_TOKEN || '8793062384:AAHmZZpVwiWX7-1CsuofBZqhtoQBgymzNHk';
 if (!BOT_TOKEN) {
   console.log('⚠️ BOT_TOKEN is missing in Environment Variables! Please add BOT_TOKEN in Render settings.');
 }
