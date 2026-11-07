@@ -13,7 +13,7 @@ const { Button } = require('telegram/tl/custom/button');
 
 const API_ID = parseInt(process.env.API_ID || '31266551', 10);
 const API_HASH = process.env.API_HASH || 'f2ebfd089cc0958fbedad2088fdc917b';
-const BOT_TOKEN = process.env.BOT_TOKEN || '8793062384:AAHmZZpVwiWX7-1CsuofBZqhtoQBgymzNHk';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8793062384:AAF9mTLdGnio9PhWj6fyHbQ2ZW0zy4IUI8A';
 const TMDB_KEY = process.env.TMDB_KEY || '60826475ab1668347a09ec5f5f22b9e3';
 const FIREBASE_URL = process.env.FIREBASE_URL || 'https://app-seller-8980c-default-rtdb.firebaseio.com';
 const PORT = process.env.PORT || 8080;
