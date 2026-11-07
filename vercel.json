@@ -2,8 +2,21 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/stream/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/watch/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/dl/:path*",
+      "destination": "/api/index"
+    },
+    {
       "source": "/(.*)",
-      "destination": "https://ramjiram-1cg.onrender.com/$1"
+      "destination": "/index.html"
     }
   ]
 }
+
