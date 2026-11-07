@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // --- Configuration & Credentials ---
-const BOT_TOKEN = process.env.BOT_TOKEN || '8793062384:AAE9mbJzx5p_eSxtwvbi5Qwi88ODhWzZDwk';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8793062384:AAF9mTLdGnio9PhWj6fyHbQ2ZW0zy4IUI8A';
 const TMDB_API_KEY = process.env.TMDB_KEY || '60826475ab1668347a09ec5f5f22b9e3';
 const FIREBASE_DB_URL = process.env.FIREBASE_URL || 'https://app-seller-8980c-default-rtdb.firebaseio.com';
 const PORT = process.env.PORT || 8080;
