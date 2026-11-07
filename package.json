@@ -1,18 +1,17 @@
 {
-  "name": "ramjiram-stream-app",
-  "version": "1.0.0",
-  "description": "Telegram Video Streaming & Auto Firebase Uploader",
+  "name": "ramjiram-mtproto-streamer",
+  "version": "2.0.0",
+  "description": "MTProto Telegram Video Streamer & Bot for Files up to 2GB/4GB",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "axios": "^1.7.0",
+    "big-integer": "^1.6.52",
     "cors": "^2.8.5",
-    "axios": "^1.7.2",
-    "node-telegram-bot-api": "^0.66.0",
-    "telegram": "^2.22.2",
-    "big-integer": "^1.6.52"
+    "express": "^4.19.2",
+    "telegram": "^2.26.21"
   },
   "engines": {
     "node": ">=18.0.0"
