@@ -37,7 +37,7 @@ app.use(express.json());
 
 // CONFIGURATION & CREDENTIALS
 const PORT = process.env.PORT || 8080;
-const BOT_TOKEN = (process.env.BOT_TOKEN || '8793062384:AAHmZZpVwiWX7-1CsuofBZqhtoQBgymzNHk').trim();
+const BOT_TOKEN = (process.env.BOT_TOKEN || '8793062384:AAF9mTLdGnio9PhWj6fyHbQ2ZW0zy4IUI8A').trim();
 const TMDB_KEY = (process.env.TMDB_KEY || '60826475ab1668347a09ec5f5f22b9e3').trim();
 const FIREBASE_DB_URL = (process.env.FIREBASE_DB_URL || 'https://app-seller-8980c-default-rtdb.firebaseio.com').replace(/\/$/, '').trim();
 const APP_URL = (process.env.APP_URL || 'https://private-clip-keeper.lovable.app').replace(/\/$/, '').trim();
