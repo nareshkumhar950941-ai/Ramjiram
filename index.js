@@ -1,327 +1,318 @@
-/**
- * MTProto Telegram Streaming Server & Bot
- * Supports files up to 2GB/4GB with full HTTP Range (fast seek & playback)
- */
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const bigInt = require('big-integer');
-const { TelegramClient } = require('telegram');
+const { TelegramClient, Api } = require('telegram');
 const { StringSession } = require('telegram/sessions');
-const { NewMessage } = require('telegram/events/NewMessage');
-const { Button } = require('telegram/tl/custom/button');
-
-const API_ID = parseInt(process.env.API_ID || '31266551', 10);
-const API_HASH = process.env.API_HASH || 'f2ebfd089cc0958fbedad2088fdc917b';
-const BOT_TOKEN = process.env.BOT_TOKEN || '8793062384:AAF9mTLdGnio9PhWj6fyHbQ2ZW0zy4IUI8A';
-const TMDB_KEY = process.env.TMDB_KEY || '60826475ab1668347a09ec5f5f22b9e3';
-const FIREBASE_URL = process.env.FIREBASE_URL || 'https://app-seller-8980c-default-rtdb.firebaseio.com';
-const PORT = process.env.PORT || 8080;
-
-function getBaseUrl() {
-  if (process.env.SERVER_URL) return process.env.SERVER_URL.replace(/\/$/, '');
-  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-  return 'https://ramjiram-production-ab75.up.railway.app';
-}
+const { NewMessage } = require('telegram/events');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize MTProto Client
-const client = new TelegramClient(new StringSession(''), API_ID, API_HASH, {
+const PORT = process.env.PORT || 8080;
+const API_ID = parseInt(process.env.API_ID || '31266551', 10);
+const API_HASH = process.env.API_HASH || 'f2ebfd089cc0958fbedad2088fdc917b';
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const SESSION_STRING = process.env.SESSION_STRING || '';
+const TMDB_API_KEY = process.env.TMDB_KEY || '60826475ab1668347a09ec5f5f22b9e3';
+const FIREBASE_URL = process.env.FIREBASE_URL || 'https://app-seller-8980c-default-rtdb.firebaseio.com';
+const APP_URL = process.env.APP_URL || 'https://private-clip-keeper.lovable.app/filmyfly';
+
+const stringSession = new StringSession(SESSION_STRING);
+const client = new TelegramClient(stringSession, API_ID, API_HASH, {
   connectionRetries: 5,
-  useWSS: false,
 });
 
-function cleanMovieName(raw) {
-  if (!raw) return { title: 'Unknown Video', year: null, season: null, episode: null };
-  let name = raw.replace(/\.[a-zA-Z0-9]{2,4}$/, '');
-  name = name.replace(/[._\-]/g, ' ');
-
-  let season = null, episode = null, year = null;
-  const seMatch = name.match(/s(\d{1,2})[.\s_-]*e(\d{1,2})/i);
-  if (seMatch) {
-    season = parseInt(seMatch[1], 10);
-    episode = parseInt(seMatch[2], 10);
-    name = name.slice(0, seMatch.index);
+function getPublicUrl(req) {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '');
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN.replace(/\/+$/, '')}`;
+  const host = req ? req.get('host') : '';
+  if (host && !host.includes('localhost')) {
+    return `https://${host}`;
   }
-  const yearMatch = name.match(/\b(19\d\d|20\d\d)\b/);
-  if (yearMatch) {
-    year = yearMatch[1];
-    name = name.slice(0, yearMatch.index);
-  }
-
-  name = name.replace(/\b(480p|720p|1080p|2160p|4k|hdrip|webrip|web-dl|bluray|x264|x265|hevc|aac|esub|hindi|english|dual|audio|mkv|mp4)\b/gi, '');
-  const title = name.trim().replace(/\s+/g, ' ') || 'Video';
-  return { title, year, season, episode };
+  return '';
 }
 
-async function getTmdbInfo(cleanTitle, year) {
+function cleanTitle(raw) {
+  if (!raw) return 'Video';
+  let t = raw.replace(/\.[a-zA-Z0-9]{2,4}$/, '');
+  t = t.replace(/[._\-+]/g, ' ');
+  t = t.replace(/\b(480p|720p|1080p|2160p|4k|hdrip|webrip|web-dl|bluray|x264|x265|hevc|aac|esub)\b/gi, '');
+  return t.replace(/\s+/g, ' ').trim() || raw;
+}
+
+async function searchTMDB(query) {
   try {
-    const q = encodeURIComponent(cleanTitle);
-    const yr = year ? `&year=${year}` : '';
-    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_KEY}&query=${q}${yr}`;
-    const res = await axios.get(url, { timeout: 6000 });
-    const match = res.data?.results?.[0];
-    if (match) {
+    const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}`;
+    const res = await axios.get(url, { timeout: 8000 });
+    const results = res.data && res.data.results;
+    if (results && results.length > 0) {
+      const match = results.find(r => r.media_type === 'movie' || r.media_type === 'tv') || results[0];
       return {
-        title: match.title || match.name || cleanTitle,
-        poster: match.poster_path ? `https://image.tmdb.org/t/p/w500${match.poster_path}` : null,
-        rating: match.vote_average ? match.vote_average.toFixed(1) : '7.0',
+        title: match.title || match.name || query,
         overview: match.overview || '',
+        poster: match.poster_path ? `https://image.tmdb.org/t/p/w500${match.poster_path}` : '',
+        backdrop: match.backdrop_path ? `https://image.tmdb.org/t/p/w1280${match.backdrop_path}` : '',
+        rating: match.vote_average || 7.0,
+        year: (match.release_date || match.first_air_date || '').split('-')[0] || ''
       };
     }
   } catch (err) {
-    console.error('TMDB lookup failed:', err.message);
+    console.error('[TMDB] Search error:', err.message);
   }
-  return { title: cleanTitle, poster: null, rating: '7.0', overview: '' };
+  return { title: query, overview: '', poster: '', backdrop: '', rating: 7.0, year: '' };
 }
 
-app.get('/', (req, res) => {
-  res.send('⚡ MTProto Telegram Streaming Server is Active & Running!');
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', mtproto: client.connected, timestamp: new Date().toISOString() });
-});
-
-async function getMessageDocument(chatId, msgId) {
+async function saveToFirebase(record) {
   try {
-    const peer = chatId.startsWith('-100') || chatId.startsWith('-') ? chatId : parseInt(chatId, 10);
-    const msgs = await client.getMessages(peer, { ids: [parseInt(msgId, 10)] });
-    const msg = msgs && msgs[0];
-    if (!msg || !msg.media) return null;
-    const doc = msg.media.document;
-    if (!doc) return null;
-
-    let fileName = 'video.mp4';
-    if (doc.attributes) {
-      const fileAttr = doc.attributes.find(a => a.className === 'DocumentAttributeFilename');
-      if (fileAttr && fileAttr.fileName) fileName = fileAttr.fileName;
-    }
-    return { doc, fileName, size: Number(doc.size), mimeType: doc.mimeType || 'video/mp4' };
-  } catch (e) {
-    console.error('Error fetching message document:', e.message);
+    const endpoint = record.type === 'series' ? 'series' : 'movies';
+    const res = await axios.post(`${FIREBASE_URL}/${endpoint}.json`, record, { timeout: 8000 });
+    return res.data && res.data.name;
+  } catch (err) {
+    console.error('[Firebase] Save error:', err.message);
     return null;
   }
 }
 
-app.head('/stream/:chatId/:msgId/:fileName?', async (req, res) => {
-  const { chatId, msgId } = req.params;
-  const media = await getMessageDocument(chatId, msgId);
-  if (!media) return res.status(404).end();
+async function handleMtprotoStream(req, res, asDownload) {
+  const { chatId, messageId } = req.params;
+  const cleanMsgId = parseInt(messageId.replace(/\.(mp4|mkv|webm)$/i, ''), 10);
 
-  res.set({
-    'Content-Type': media.mimeType,
-    'Content-Length': media.size,
-    'Accept-Ranges': 'bytes',
-    'Content-Disposition': `inline; filename="${encodeURIComponent(media.fileName)}"`
-  });
-  res.status(200).end();
-});
+  if (!client.connected) {
+    return res.status(503).send('Telegram MTProto client is connecting, please retry in a few seconds.');
+  }
 
-// Byte-Range High Speed MTProto Streamer
-app.get('/stream/:chatId/:msgId/:fileName?', async (req, res) => {
-  const { chatId, msgId } = req.params;
-  const media = await getMessageDocument(chatId, msgId);
-  if (!media) return res.status(404).send('Video not found or inaccessible.');
-
-  const totalSize = media.size;
-  const mimeType = media.mimeType;
-  const CHUNK_BYTES = 512 * 1024; // 512 KB per chunk
-
-  const range = req.headers.range;
-  if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
-
-    if (start >= totalSize || end >= totalSize) {
-      res.set('Content-Range', `bytes */${totalSize}`);
-      return res.status(416).send('Requested Range Not Satisfiable');
+  try {
+    let peer = chatId;
+    if (!isNaN(chatId)) {
+      peer = parseInt(chatId, 10);
     }
 
-    const chunkSize = (end - start) + 1;
-    const numChunks = Math.ceil(chunkSize / CHUNK_BYTES);
+    const messages = await client.getMessages(peer, { ids: [cleanMsgId] });
+    const msg = messages && messages[0];
 
-    res.status(206);
-    res.set({
-      'Content-Range': `bytes ${start}-${end}/${totalSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunkSize,
-      'Content-Type': mimeType,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(media.fileName)}"`
-    });
-
-    try {
-      const stream = client.iterDownload({
-        file: media.doc,
-        offset: bigInt(start),
-        limit: numChunks,
-        requestSize: CHUNK_BYTES,
-      });
-
-      let bytesSent = 0;
-      for await (const chunk of stream) {
-        if (res.writableEnded || res.destroyed) break;
-        const remaining = chunkSize - bytesSent;
-        if (remaining <= 0) break;
-        const toSend = chunk.length > remaining ? chunk.slice(0, remaining) : chunk;
-        res.write(toSend);
-        bytesSent += toSend.length;
-      }
-      res.end();
-    } catch (err) {
-      if (!res.headersSent) res.status(500).send('Streaming error: ' + err.message);
+    if (!msg || !msg.media) {
+      return res.status(404).send('Video not found or deleted from Telegram.');
     }
-  } else {
-    res.status(200);
-    res.set({
-      'Content-Length': totalSize,
+
+    const doc = msg.media.document || msg.media;
+    const fileSize = doc.size ? Number(doc.size) : 0;
+    
+    let fileName = `video_${cleanMsgId}.mp4`;
+    if (doc.attributes) {
+      const fnAttr = doc.attributes.find(a => a.fileName);
+      if (fnAttr && fnAttr.fileName) {
+        fileName = fnAttr.fileName.replace(/\.mkv$/i, '.mp4');
+      }
+    }
+
+    const range = req.headers.range;
+    const headers = {
       'Accept-Ranges': 'bytes',
-      'Content-Type': mimeType,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(media.fileName)}"`
+      'Content-Type': 'video/mp4',
+      'Access-Control-Allow-Origin': '*'
+    };
+
+    if (asDownload) {
+      headers['Content-Disposition'] = `attachment; filename="${fileName}"`;
+    } else {
+      headers['Content-Disposition'] = `inline; filename="${fileName}"`;
+    }
+
+    let start = 0;
+    let end = fileSize ? fileSize - 1 : undefined;
+
+    if (range && fileSize) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      start = parseInt(parts[0], 10);
+      end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = (end - start) + 1;
+
+      headers['Content-Range'] = `bytes ${start}-${end}/${fileSize}`;
+      headers['Content-Length'] = chunkSize;
+      res.writeHead(206, headers);
+    } else {
+      if (fileSize) headers['Content-Length'] = fileSize;
+      res.writeHead(200, headers);
+    }
+
+    const iter = client.iterDownload({
+      file: msg.media,
+      offset: bigInt(start),
+      limit: end !== undefined ? (end - start + 1) : undefined,
+      chunkSize: 512 * 1024
     });
 
-    try {
-      const stream = client.iterDownload({
-        file: media.doc,
-        requestSize: CHUNK_BYTES,
-      });
-
-      for await (const chunk of stream) {
-        if (res.writableEnded || res.destroyed) break;
-        res.write(chunk);
-      }
+    req.on('close', () => {
       res.end();
-    } catch (err) {
-      if (!res.headersSent) res.status(500).send('Streaming error: ' + err.message);
+    });
+
+    for await (const chunk of iter) {
+      if (res.writableEnded) break;
+      res.write(chunk);
+    }
+    res.end();
+  } catch (err) {
+    console.error('[MTProto Stream Error]:', err.message);
+    if (!res.headersSent) {
+      res.status(500).send('Streaming error: ' + err.message);
     }
   }
+}
+
+app.get('/stream/:chatId/:messageId', (req, res) => handleMtprotoStream(req, res, false));
+app.get('/dl/:chatId/:messageId', (req, res) => handleMtprotoStream(req, res, true));
+
+app.get('/watch/:chatId/:messageId', (req, res) => {
+  const { chatId, messageId } = req.params;
+  const cleanMsgId = messageId.replace(/\.(mp4|mkv|webm)$/i, '');
+  const baseUrl = getPublicUrl(req);
+  const streamUrl = `${baseUrl}/stream/${chatId}/${cleanMsgId}.mp4`;
+  const dlUrl = `${baseUrl}/dl/${chatId}/${cleanMsgId}.mp4`;
+  const mxIntent = `intent:${streamUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end`;
+  const vlcIntent = `vlc://${streamUrl}`;
+
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Watch Video - Filmy Fly</title>
+      <style>
+        body { margin: 0; background: #0b0b0b; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .player-container { width: 100%; max-width: 800px; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        video { width: 100%; height: auto; display: block; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; width: 100%; max-width: 800px; justify-content: center; }
+        .btn { padding: 12px 22px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 15px; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-dl { background: #e50914; color: #fff; }
+        .btn-mx { background: #0084ff; color: #fff; }
+        .btn-vlc { background: #ff8800; color: #fff; }
+        .note { color: #888; font-size: 13px; margin-top: 15px; text-align: center; max-width: 600px; }
+      </style>
+    </head>
+    <body>
+      <h2 style="margin-bottom:15px;">🎬 High-Speed Video Player</h2>
+      <div class="player-container">
+        <video controls autoplay playsinline src="${streamUrl}"></video>
+      </div>
+      <div class="btn-group">
+        <a href="${dlUrl}" class="btn btn-dl" download>📥 Download MP4</a>
+        <a href="${mxIntent}" class="btn btn-mx">📱 Play in MX Player</a>
+        <a href="${vlcIntent}" class="btn btn-vlc">📱 Play in VLC</a>
+      </div>
+      <p class="note">Agar browser mein MKV video/audio na chale, toh "Play in MX Player" ya "Play in VLC" par click karein.</p>
+    </body>
+    </html>
+  `);
 });
 
-// Built-in Player Page
-app.get('/watch/:chatId/:msgId', async (req, res) => {
-  const { chatId, msgId } = req.params;
-  const media = await getMessageDocument(chatId, msgId);
-  const title = media ? media.fileName : 'Video Stream';
-  const streamUrl = `${getBaseUrl()}/stream/${chatId}/${msgId}/${encodeURIComponent(media?.fileName || 'video.mp4')}`;
-  const vlcUrl = `vlc://${streamUrl}`;
-  const mxUrl = `intent:${streamUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end`;
-  const playitUrl = `playit://playerv2/video?url=${encodeURIComponent(streamUrl)}`;
-
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
-  <style>
-    body { margin: 0; background: #0f172a; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 15px; }
-    h2 { font-size: 1.1rem; text-align: center; margin: 15px 0; word-break: break-word; max-width: 800px; }
-    video { width: 100%; max-width: 800px; border-radius: 12px; background: #000; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-    .btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; width: 100%; max-width: 800px; margin-top: 15px; }
-    .btn { display: flex; align-items: center; justify-content: center; padding: 12px; background: #1e293b; color: #38bdf8; text-decoration: none; border-radius: 8px; font-weight: bold; border: 1px solid #334155; }
-    .btn:hover { background: #334155; }
-    .btn.dl { background: #0284c7; color: #fff; }
-  </style>
-</head>
-<body>
-  <h2>🎬 ${title}</h2>
-  <video controls playsinline preload="metadata">
-    <source src="${streamUrl}" type="video/mp4">
-    Your browser does not support HTML5 video.
-  </video>
-  <div class="btn-grid">
-    <a class="btn dl" href="${streamUrl}" download>📥 Download</a>
-    <a class="btn" href="${vlcUrl}">🟠 Open in VLC</a>
-    <a class="btn" href="${mxUrl}">🔵 Open in MX Player</a>
-    <a class="btn" href="${playitUrl}">▶️ Open in PLAYit</a>
-  </div>
-</body>
-</html>`);
-});
-
-// Start Bot
-async function startBot() {
-  console.log('Connecting to Telegram via MTProto...');
-  await client.start({
-    botAuthToken: BOT_TOKEN,
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    uptime: process.uptime(),
+    mtprotoConnected: client.connected
   });
-  console.log('✅ Connected to MTProto successfully!');
+});
 
-  client.addEventHandler(async (event) => {
-    const msg = event.message;
-    if (!msg) return;
+async function startBot() {
+  if (!BOT_TOKEN) {
+    console.error('[Bot Error] BOT_TOKEN environment variable is missing.');
+    return;
+  }
 
-    const chatId = msg.chatId ? msg.chatId.toString() : (msg.peerId?.userId || msg.peerId?.channelId || '').toString();
+  try {
+    console.log('[MTProto] Connecting client with API_ID and BOT_TOKEN...');
+    await client.start({ botAuthToken: BOT_TOKEN });
+    console.log('[MTProto] Client connected successfully!');
 
-    if (msg.message && msg.message.startsWith('/start')) {
-      await client.sendMessage(chatId, {
-        message: '👋 Welcome to Filmy Fly MTProto Bot!\n\nSend or forward any video (up to 2GB/4GB). I will automatically stream it and upload it to your Lovable app!',
+    client.addEventHandler(async (event) => {
+      const message = event.message;
+      if (!message) return;
+
+      const media = message.media;
+      if (!media) {
+        if (message.message === '/start') {
+          await client.sendMessage(message.chatId, {
+            message: '🎬 Welcome to Filmy Fly MTProto Bot!\n\nKoi bhi badi movie ya video (500MB, 1GB, 2GB+) bhejo. Streaming aur direct download link turant mil jayega.'
+          });
+        }
+        return;
+      }
+
+      let rawName = 'Movie';
+      if (media.document && media.document.attributes) {
+        const fn = media.document.attributes.find(a => a.fileName);
+        if (fn && fn.fileName) rawName = fn.fileName;
+      }
+      if (rawName === 'Movie' && message.message) {
+        rawName = message.message;
+      }
+
+      const cleanName = cleanTitle(rawName);
+      const chatId = message.chatId ? message.chatId.toString() : '';
+      const msgId = message.id;
+
+      const statusMsg = await client.sendMessage(message.chatId, {
+        message: `⏳ Processing: "${cleanName}"...`
       });
-      return;
-    }
 
-    if (msg.media && msg.media.document) {
-      const doc = msg.media.document;
-      let rawName = 'Video';
-      if (doc.attributes) {
-        const fileAttr = doc.attributes.find(a => a.className === 'DocumentAttributeFilename');
-        if (fileAttr && fileAttr.fileName) rawName = fileAttr.fileName;
+      const meta = await searchTMDB(cleanName);
+      const baseUrl = getPublicUrl();
+
+      const streamUrl = baseUrl ? `${baseUrl}/stream/${chatId}/${msgId}.mp4` : '';
+      const dlUrl = baseUrl ? `${baseUrl}/dl/${chatId}/${msgId}.mp4` : '';
+      const watchUrl = baseUrl ? `${baseUrl}/watch/${chatId}/${msgId}` : `${APP_URL}?title=${encodeURIComponent(meta.title)}`;
+
+      const record = {
+        title: meta.title,
+        link: streamUrl || watchUrl,
+        streamUrl: streamUrl || watchUrl,
+        downloadUrl: dlUrl,
+        poster: meta.poster,
+        backdrop: meta.backdrop,
+        rating: meta.rating,
+        year: meta.year,
+        overview: meta.overview,
+        type: rawName.toLowerCase().includes('season') || rawName.toLowerCase().includes('episode') ? 'series' : 'movie',
+        createdAt: new Date().toISOString()
+      };
+
+      await saveToFirebase(record);
+
+      const buttons = [];
+      if (baseUrl) {
+        buttons.push([
+          new Api.KeyboardButtonUrl({ text: '🎬 Watch Online (.mp4)', url: watchUrl }),
+          new Api.KeyboardButtonUrl({ text: '📥 Download (.mp4)', url: dlUrl })
+        ]);
+        buttons.push([
+          new Api.KeyboardButtonUrl({ text: '📱 MX Player', url: `intent:${streamUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end` }),
+          new Api.KeyboardButtonUrl({ text: '📱 VLC Player', url: `vlc://${streamUrl}` })
+        ]);
+      } else {
+        buttons.push([
+          new Api.KeyboardButtonUrl({ text: '📱 Open in Filmy Fly App', url: `${APP_URL}?title=${encodeURIComponent(meta.title)}` })
+        ]);
       }
-      if (rawName === 'Video' && msg.message) {
-        rawName = msg.message;
-      }
 
-      const parsed = cleanMovieName(rawName);
-      const tmdb = await getTmdbInfo(parsed.title, parsed.year);
+      const captionText = `🎬 **${meta.title}** (${meta.year || '2026'})\n⭐ Rating: ${meta.rating}/10\n\n⚡ **2GB+ Unlimited Stream & Download Ready:**`;
 
-      const streamUrl = `${getBaseUrl()}/stream/${chatId}/${msg.id}/${encodeURIComponent(rawName)}`;
-      const watchUrl = `${getBaseUrl()}/watch/${chatId}/${msg.id}`;
-      const appPlayUrl = `https://private-clip-keeper.lovable.app/?stream=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(tmdb.title)}${tmdb.poster ? `&poster=${encodeURIComponent(tmdb.poster)}` : ''}`;
-
-      try {
-        const payload = {
-          title: tmdb.title,
-          poster: tmdb.poster || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500',
-          streamUrl: streamUrl,
-          rating: tmdb.rating,
-          overview: tmdb.overview,
-          category: parsed.season ? 'Series' : 'Movie',
-          season: parsed.season || null,
-          episode: parsed.episode || null,
-          addedAt: new Date().toISOString()
-        };
-        const endpoint = parsed.season ? `${FIREBASE_URL}/series.json` : `${FIREBASE_URL}/movies.json`;
-        await axios.post(endpoint, payload, { timeout: 5000 });
-        console.log(`✅ Saved "${tmdb.title}" to Firebase!`);
-      } catch (fErr) {
-        console.error('Firebase save error:', fErr.message);
-      }
-
-      const replyText = `🎬 **${tmdb.title}**\n\n` +
-        `📦 Size: ${(Number(doc.size) / (1024 * 1024)).toFixed(1)} MB\n` +
-        `⭐ Rating: ${tmdb.rating}\n\n` +
-        `✅ Successfully processed via MTProto! Stream links are ready:`;
-
-      await client.sendMessage(chatId, {
-        message: replyText,
-        buttons: [
-          [Button.url('▶️ Watch on Lovable Site', appPlayUrl)],
-          [Button.url('🌐 Open Player Page', watchUrl)],
-          [Button.url('📥 Direct Stream / Download', streamUrl)]
-        ]
+      await client.sendMessage(message.chatId, {
+        message: captionText,
+        buttons: buttons
       });
-    }
-  }, new NewMessage({}));
+
+      await client.deleteMessages(message.chatId, [statusMsg.id], { revoke: true }).catch(() => {});
+    }, new NewMessage({}));
+
+  } catch (err) {
+    console.error('[MTProto Init Error]:', err.message);
+  }
 }
 
 app.listen(PORT, () => {
-  console.log(`🚀 HTTP Server running on port ${PORT}`);
-  startBot().catch(err => {
-    console.error('Failed to start MTProto Bot:', err);
-  });
+  console.log(`Web server listening on port ${PORT}`);
+  startBot();
 });
-    
